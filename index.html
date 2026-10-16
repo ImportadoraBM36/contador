@@ -13,23 +13,33 @@
 html,body{margin:0}
 body{background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:12px;max-width:760px;margin:0 auto}
 h1{font-size:18px;margin:4px 0 12px}
+h2{font-size:15px;margin:0 0 8px}
 .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:12px}
 .stage{position:relative;background:#000;border-radius:10px;overflow:hidden;min-height:180px;display:flex;align-items:center;justify-content:center}
 canvas#view{width:100%;height:auto;display:block}
 .ph{position:absolute;color:#9aa4b2;font-size:14px;text-align:center;padding:16px}
-.count{display:flex;align-items:baseline;gap:8px;margin:12px 2px 4px}
-.count b{font-size:56px;line-height:1;color:var(--ac)}
-.count span{color:var(--mut)}
+.count{display:flex;align-items:baseline;gap:8px;margin:12px 2px 0}
+.count b{font-size:64px;line-height:1;color:var(--ac)}
+.count span{color:var(--mut);font-size:18px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
-button,label.btn{flex:1;min-width:130px;padding:12px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font:inherit;font-weight:600;text-align:center;cursor:pointer}
+button{flex:1;min-width:110px;padding:12px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font:inherit;font-weight:600;text-align:center;cursor:pointer}
 button.p{background:var(--ac);color:var(--acx);border-color:transparent}
 button.p.r{background:#dc2626;color:#fff}
 button:disabled{opacity:.45}
+button.x{flex:0;min-width:0;padding:4px 10px}
 .ctl{margin-top:10px}
 .ctl label{display:flex;justify-content:space-between;color:var(--mut);font-size:14px;margin-bottom:4px}
 input[type=range]{width:100%}
-select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font:inherit}
-.msg{color:var(--mut);font-size:13px;margin-top:8px;min-height:18px}
+select,input.t{width:100%;padding:10px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font:inherit}
+input.t{margin-bottom:8px}
+.chk{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:15px}
+.msg{color:var(--mut);font-size:13px;margin-top:6px;min-height:16px}
+ul.l{list-style:none;margin:8px 0 0;padding:0}
+ul.l li{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--bd)}
+ul.l li span{flex:1}
+ul.l li b{font-size:20px;color:var(--ac)}
+#items{max-height:230px;overflow-y:auto}
+#tot{font-weight:600;margin-top:8px}
 </style>
 </head>
 <body>
@@ -38,19 +48,37 @@ select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--bd);bac
 <div class="card">
   <div class="stage">
     <canvas id="view" width="640" height="360"></canvas>
-    <div class="ph" id="ph">Toque em “Abrir câmera” ou escolha uma foto</div>
+    <div class="ph" id="ph">Toque em “Abrir câmera” e passe os itens, um de cada vez</div>
   </div>
-  <div class="count"><b id="n">0</b><span id="lbl">produtos</span></div>
+  <div class="count"><b id="n">0</b><span id="lbl">contados</span></div>
+  <div class="msg" id="now">Na tela agora: 0</div>
   <div class="msg" id="dets"></div>
   <div class="msg" id="msg"></div>
 </div>
 
 <div class="card">
   <div class="row">
-    <button class="p" id="bStart">Abrir câmera</button>
-    <button id="bShot" disabled>📸 Tirar foto</button>
-    <button id="bLive" disabled>Voltar ao vivo</button>
-    <label class="btn">🖼️ Enviar foto<input id="file" type="file" accept="image/*" capture="environment" hidden></label>
+    <button class="p" id="bStart" style="flex-basis:100%">Abrir câmera</button>
+    <button id="bMinus">− 1 (desfazer)</button>
+    <button id="bPlus">+ 1 (manual)</button>
+    <button id="bZero">Zerar</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Itens contados nesta caixa</h2>
+  <ul class="l" id="items"></ul>
+  <input class="t" id="nome" placeholder="Nome da caixa (opcional, ex: Caixa 12)" style="margin-top:10px">
+  <button class="p" id="bFin" style="width:100%">✅ Finalizar caixa e salvar</button>
+</div>
+
+<div class="card">
+  <h2>Caixas finalizadas</h2>
+  <ul class="l" id="log"></ul>
+  <div id="tot"></div>
+  <div class="row" style="margin-top:10px">
+    <button id="bCopy">📋 Copiar lista</button>
+    <button id="bClr">🗑️ Limpar tudo</button>
   </div>
 </div>
 
@@ -59,7 +87,8 @@ select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--bd);bac
     <select id="cls"><option value="all">Tudo (menos pessoas)</option></select></div>
   <div class="ctl"><label><span>Confiança mínima da IA</span><span id="vC"></span></label>
     <input type="range" id="conf" min="10" max="90" step="5" value="40"></div>
-  <div class="msg">Abaixo da contagem aparece o nome que a IA deu para cada coisa que ela vê. Escolha em “O que contar” o nome que corresponde ao seu produto. Se a IA contar coisas a mais, aumente a confiança; se faltar produto, diminua.</div>
+  <label class="chk"><input type="checkbox" id="snd" checked> Som e vibração a cada item contado</label>
+  <div class="msg">Passe um item de cada vez, devagar, sem um na frente do outro. Cada item é contado uma vez, quando a IA o confirma (caixa verde com número). Caixa amarela significa que ainda está confirmando. Se errar, use − 1 ou + 1.</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
@@ -68,11 +97,64 @@ select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--bd);bac
 const $=id=>document.getElementById(id);
 const view=$('view'),vctx=view.getContext('2d');
 const video=document.createElement('video');video.playsInline=true;video.muted=true;
-const still=document.createElement('canvas');
-let model=null,stream=null,mode='idle',hist=[],timer=null,busy=false,last=null,tracks=[];
+const MAXMISS=12,CONFIRM=3,SHOWMISS=3;
+let model=null,stream=null,mode='idle',timer=null,busy=false,tracks=[],seq=0,ac=null;
 const known=new Set();
 const msg=t=>$('msg').textContent=t;
+const store={
+  get(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+};
+let items=store.get('itens',[]),log=store.get('contagens',[]);
+seq=items.reduce((m,r)=>Math.max(m,r.num||0),0);
+const wanted=c=>{const s=$('cls').value;return s==='all'?c!=='person':c===s};
+const minS=()=>(+$('conf').value)/100;
 
+function beep(){
+  if(!$('snd').checked)return;
+  try{
+    if(navigator.vibrate)navigator.vibrate(40);
+    if(!ac)return;
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.frequency.value=880;g.gain.value=0.08;o.connect(g);g.connect(ac.destination);
+    o.start();o.stop(ac.currentTime+0.07);
+  }catch(e){}
+}
+
+/* ---------- lista de itens da caixa ---------- */
+function drawItems(){
+  $('n').textContent=items.length;
+  $('lbl').textContent=items.length===1?'contado':'contados';
+  const ul=$('items');ul.innerHTML='';
+  if(!items.length){const li=document.createElement('li');li.textContent='Nenhum item contado ainda.';li.style.color='var(--mut)';ul.appendChild(li);return}
+  items.forEach((r,i)=>{
+    const li=document.createElement('li'),t=document.createElement('span'),x=document.createElement('button');
+    t.textContent='#'+r.num+' · '+r.cls+(r.score?' · '+r.score+'%':'')+' · '+r.time;
+    x.textContent='✕';x.className='x';
+    x.onclick=()=>{items.splice(i,1);store.set('itens',items);drawItems()};
+    li.append(t,x);ul.appendChild(li);
+  });
+}
+function addItem(cls,score){
+  const r={num:++seq,cls,score,time:new Date().toLocaleTimeString('pt-BR')};
+  items.unshift(r);store.set('itens',items);drawItems();beep();
+  return r.num;
+}
+
+/* ---------- caixas finalizadas ---------- */
+function drawLog(){
+  const ul=$('log');ul.innerHTML='';
+  log.forEach((r,i)=>{
+    const li=document.createElement('li'),t=document.createElement('span'),b=document.createElement('b'),x=document.createElement('button');
+    t.textContent=r.time+' · '+(r.name||'Caixa');b.textContent=r.n;x.textContent='✕';x.className='x';
+    x.onclick=()=>{log.splice(i,1);store.set('contagens',log);drawLog()};
+    li.append(t,b,x);ul.appendChild(li);
+  });
+  const tot=log.reduce((s,r)=>s+r.n,0);
+  $('tot').textContent=log.length?'Total: '+tot+' itens em '+log.length+(log.length===1?' caixa':' caixas'):'Nenhuma caixa finalizada ainda.';
+}
+
+/* ---------- IA ---------- */
 async function loadModel(){
   if(model)return true;
   if(!window.cocoSsd||!window.tf){msg('Não consegui carregar a IA. Confira a internet e se a página está em HTTPS.');return false}
@@ -81,118 +163,119 @@ async function loadModel(){
   catch(e){msg('Falha ao carregar a IA: '+(e.message||e));return false}
 }
 
-async function detect(src,sw,sh,smooth){
-  if(busy||!model)return;
+function dist(t,d){
+  const cx=t.bbox[0]+t.bbox[2]/2,cy=t.bbox[1]+t.bbox[3]/2;
+  const dx=d.bbox[0]+d.bbox[2]/2,dy=d.bbox[1]+d.bbox[3]/2;
+  return Math.hypot(cx-dx,cy-dy)/Math.max(t.bbox[2],t.bbox[3],1);
+}
+
+function track(p){
+  const pairs=[];
+  tracks.forEach((t,ti)=>p.forEach((d,di)=>{
+    if(d.class===t.cls){const v=dist(t,d);if(v<0.9)pairs.push([v,ti,di])}
+  }));
+  pairs.sort((a,b)=>a[0]-b[0]);
+  const ut=new Set(),ud=new Set();
+  pairs.forEach(([v,ti,di])=>{
+    if(ut.has(ti)||ud.has(di))return;
+    ut.add(ti);ud.add(di);
+    const t=tracks[ti],d=p[di];
+    t.bbox=t.bbox.map((q,k)=>q*0.4+d.bbox[k]*0.6);
+    t.score=t.score*0.6+d.score*0.4;t.miss=0;t.hits++;
+  });
+  tracks.forEach((t,i)=>{if(!ut.has(i))t.miss++});
+  p.forEach((d,di)=>{
+    if(!ud.has(di)&&d.score>=minS())tracks.push({cls:d.class,bbox:d.bbox.slice(),score:d.score,miss:0,hits:1,counted:false,num:0});
+  });
+  tracks=tracks.filter(t=>t.miss<=MAXMISS);
+  tracks.forEach(t=>{
+    if(!t.counted&&t.hits>=CONFIRM&&t.score>=minS()*0.8&&wanted(t.cls)){
+      t.counted=true;t.num=addItem(t.cls,Math.round(t.score*100));
+    }
+  });
+}
+
+function render(p){
+  const sw=video.videoWidth,sh=video.videoHeight;
+  p.forEach(d=>{if(!known.has(d.class)){known.add(d.class);const o=document.createElement('option');o.value=d.class;o.textContent=d.class;$('cls').appendChild(o)}});
+  view.width=sw;view.height=sh;vctx.drawImage(video,0,0,sw,sh);
+  const fs=Math.max(14,sw/32);vctx.font='bold '+fs+'px system-ui';vctx.lineWidth=Math.max(2,sw/260);
+  let now=0;
+  tracks.forEach(t=>{
+    if(t.miss>SHOWMISS||t.hits<2||!wanted(t.cls))return;
+    now++;
+    const[x,y,w,h]=t.bbox,col=t.counted?'#22c55e':'#f59e0b';
+    vctx.strokeStyle=col;vctx.fillStyle=col;vctx.strokeRect(x,y,w,h);
+    vctx.fillText(t.counted?'#'+t.num:'...',x+4,y+fs);
+  });
+  $('now').textContent='Na tela agora: '+now;
+  const cnt={};p.filter(d=>d.score>=minS()).forEach(d=>cnt[d.class]=(cnt[d.class]||0)+1);
+  const keys=Object.keys(cnt);
+  $('dets').textContent=keys.length?'A IA vê: '+keys.map(k=>k+' ×'+cnt[k]).join(' · '):'A IA não reconheceu nada por enquanto.';
+  $('ph').style.display='none';
+}
+
+async function detect(){
+  if(busy||!model||!video.videoWidth)return;
   busy=true;
   try{
-    const p=await model.detect(src,40,0.05);
-    last={src,sw,sh,p};
-    if(smooth)track(p);
-    render(smooth);
+    const p=await model.detect(video,40,0.05);
+    if(mode==='live'){track(p);render(p)}
   }catch(e){msg('Erro na detecção: '+(e.message||e))}
   finally{busy=false}
 }
 
-const MAXMISS=10;
-function iou(a,b){const x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),x2=Math.min(a[0]+a[2],b[0]+b[2]),y2=Math.min(a[1]+a[3],b[1]+b[3]);const i=Math.max(0,x2-x1)*Math.max(0,y2-y1);return i/(a[2]*a[3]+b[2]*b[3]-i||1)}
-function track(p){
-  const minS=(+$('conf').value)/100,pairs=[];
-  tracks.forEach((t,ti)=>p.forEach((d,di)=>{if(d.class===t.cls){const v=iou(t.bbox,d.bbox);if(v>0.3)pairs.push([v,ti,di])}}));
-  pairs.sort((a,b)=>b[0]-a[0]);
-  const ut=new Set(),ud=new Set();
-  pairs.forEach(([v,ti,di])=>{if(ut.has(ti)||ud.has(di))return;ut.add(ti);ud.add(di);
-    const t=tracks[ti],d=p[di];
-    t.bbox=t.bbox.map((q,k)=>q*0.5+d.bbox[k]*0.5);t.score=t.score*0.6+d.score*0.4;t.miss=0;t.hits++});
-  tracks.forEach((t,i)=>{if(!ut.has(i))t.miss++});
-  p.forEach((d,di)=>{if(!ud.has(di)&&d.score>=minS)tracks.push({cls:d.class,bbox:d.bbox.slice(),score:d.score,miss:0,hits:1})});
-  tracks=tracks.filter(t=>t.miss<=MAXMISS);
-}
-
-function render(smooth){
-  if(!last||mode==='idle')return;
-  const{src,sw,sh,p}=last;
-  const minS=(+$('conf').value)/100;
-  p.forEach(d=>{if(!known.has(d.class)){known.add(d.class);const o=document.createElement('option');o.value=d.class;o.textContent=d.class;$('cls').appendChild(o)}});
-  const sel=$('cls').value;
-  const ok=smooth?tracks.filter(t=>t.hits>=2&&t.score>=minS*0.6).map(t=>({class:t.cls,bbox:t.bbox,score:t.score})):p.filter(d=>d.score>=minS);
-  const mine=ok.filter(d=>sel==='all'?d.class!=='person':d.class===sel);
-  view.width=sw;view.height=sh;vctx.drawImage(src,0,0,sw,sh);
-  const fs=Math.max(14,sw/36);vctx.font='bold '+fs+'px system-ui';vctx.lineWidth=Math.max(2,sw/260);
-  ok.forEach(d=>{
-    const mark=mine.includes(d),[x,y,w,h]=d.bbox;
-    vctx.strokeStyle=mark?'#22c55e':'#94a3b8';vctx.strokeRect(x,y,w,h);
-    if(mark){const i=mine.indexOf(d)+1;vctx.fillStyle='#22c55e';vctx.fillText(i+' '+d.class+' '+Math.round(d.score*100)+'%',x+4,y+fs)}
-  });
-  const c=mine.length;
-  $('n').textContent=c;$('lbl').textContent=c===1?'produto':'produtos';
-  const cnt={};ok.forEach(d=>cnt[d.class]=(cnt[d.class]||0)+1);
-  $('dets').textContent=ok.length?'A IA vê: '+Object.entries(cnt).map(([k,v])=>k+' ×'+v).join(' · '):'A IA não reconheceu nada por enquanto.';
-  $('ph').style.display='none';
-}
-
 async function loop(){
   if(mode!=='live')return;
-  if(video.readyState>=2&&video.videoWidth)await detect(video,video.videoWidth,video.videoHeight,true);
+  if(video.readyState>=2)await detect();
   if(mode==='live')timer=setTimeout(loop,30);
 }
 
+/* ---------- câmera ---------- */
 async function start(){
   msg('');
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg('Câmera ao vivo indisponível aqui (precisa de HTTPS). Use “Enviar foto”.');return}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg('Câmera indisponível aqui (precisa de HTTPS).');return}
   $('bStart').disabled=true;
+  try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume()}catch(e){}
   const ready=await loadModel();
+  if(!ready){$('bStart').disabled=false;return}
   try{
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
     video.srcObject=stream;await video.play();
-    mode='live';hist=[];tracks=[];$('bShot').disabled=!ready;$('bLive').disabled=true;
+    mode='live';tracks=[];
     $('bStart').textContent='Desligar câmera';$('bStart').classList.add('r');
-    if(ready)loop();
-  }catch(err){msg('Não consegui abrir a câmera ('+(err.name||'erro')+'). Use “Enviar foto”.')}
+    loop();
+  }catch(err){msg('Não consegui abrir a câmera ('+(err.name||'erro')+').')}
   $('bStart').disabled=false;
 }
 
 function stop(){
-  clearTimeout(timer);
+  clearTimeout(timer);mode='idle';tracks=[];
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
   $('bStart').textContent='Abrir câmera';$('bStart').classList.remove('r');
-  $('bShot').disabled=true;$('bLive').disabled=true;
-  if(mode==='live'){mode='idle';hist=[];tracks=[];last=null;vctx.clearRect(0,0,view.width,view.height);
-    $('n').textContent='0';$('lbl').textContent='produtos';$('dets').textContent='';$('ph').style.display='block'}
+  vctx.clearRect(0,0,view.width,view.height);
+  $('now').textContent='Na tela agora: 0';$('dets').textContent='';$('ph').style.display='block';
 }
 
-async function shot(){
-  if(mode!=='live')return;
-  clearTimeout(timer);
-  still.width=video.videoWidth;still.height=video.videoHeight;
-  still.getContext('2d').drawImage(video,0,0);
-  mode='photo';$('bLive').disabled=false;
-  while(busy)await new Promise(r=>setTimeout(r,30));
-  await detect(still,still.width,still.height,false);
-}
-
-function back(){if(!stream)return;mode='live';hist=[];tracks=[];$('bLive').disabled=true;loop()}
-
+/* ---------- botões ---------- */
 $('bStart').onclick=()=>stream?stop():start();
-$('bShot').onclick=shot;
-$('bLive').onclick=back;
-$('file').onchange=async e=>{
-  const f=e.target.files[0];if(!f)return;
-  clearTimeout(timer);
-  const ready=await loadModel();if(!ready)return;
-  const img=new Image();
-  img.onload=async()=>{const s=Math.min(1,1280/img.width);
-    still.width=img.width*s;still.height=img.height*s;
-    still.getContext('2d').drawImage(img,0,0,still.width,still.height);
-    mode='photo';$('bLive').disabled=!stream;URL.revokeObjectURL(img.src);
-    while(busy)await new Promise(r=>setTimeout(r,30));
-    await detect(still,still.width,still.height,false)};
-  img.src=URL.createObjectURL(f);e.target.value='';
+$('bMinus').onclick=()=>{if(items.length){items.shift();store.set('itens',items);drawItems()}};
+$('bPlus').onclick=()=>addItem('manual',0);
+$('bZero').onclick=()=>{if(items.length&&confirm('Zerar a contagem desta caixa?')){items=[];store.set('itens',items);drawItems()}};
+$('bFin').onclick=()=>{
+  if(!items.length){msg('Nenhum item contado para salvar.');return}
+  log.push({n:items.length,name:$('nome').value.trim(),time:new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})});
+  store.set('contagens',log);items=[];store.set('itens',items);
+  $('nome').value='';msg('Caixa salva!');drawItems();drawLog();
 };
-
-function sync(){$('vC').textContent=$('conf').value+'%';if(mode==='photo')render(false)}
-$('conf').addEventListener('input',sync);
-$('cls').addEventListener('change',()=>{hist=[];if(mode==='photo')render(false)});
-sync();
+$('bClr').onclick=()=>{if(log.length&&confirm('Apagar todas as caixas finalizadas?')){log=[];store.set('contagens',log);drawLog()}};
+$('bCopy').onclick=async()=>{
+  const txt=log.map(r=>(r.name||'Caixa')+': '+r.n+' ('+r.time+')').join('\n')+'\nTotal: '+log.reduce((s,r)=>s+r.n,0);
+  try{await navigator.clipboard.writeText(txt);msg('Lista copiada!')}catch(e){msg('Não consegui copiar.')}
+};
+$('conf').addEventListener('input',()=>{$('vC').textContent=$('conf').value+'%'});
+$('vC').textContent=$('conf').value+'%';
+drawItems();drawLog();
 </script>
 </body>
 </html>
