@@ -26,10 +26,10 @@ button.p{background:var(--ac);color:var(--acx);border-color:transparent}
 button.p.r{background:#dc2626;color:#fff}
 button:disabled{opacity:.45}
 .ctl{margin-top:10px}
-.ctl label{display:flex;justify-content:space-between;color:var(--mut);font-size:14px}
+.ctl label{display:flex;justify-content:space-between;color:var(--mut);font-size:14px;margin-bottom:4px}
 input[type=range]{width:100%}
-.chk{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:15px}
-.msg{color:var(--mut);font-size:13px;margin-top:8px}
+select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font:inherit}
+.msg{color:var(--mut);font-size:13px;margin-top:8px;min-height:18px}
 </style>
 </head>
 <body>
@@ -41,6 +41,7 @@ input[type=range]{width:100%}
     <div class="ph" id="ph">Toque em “Abrir câmera” ou escolha uma foto</div>
   </div>
   <div class="count"><b id="n">0</b><span id="lbl">produtos</span></div>
+  <div class="msg" id="dets"></div>
   <div class="msg" id="msg"></div>
 </div>
 
@@ -54,136 +55,128 @@ input[type=range]{width:100%}
 </div>
 
 <div class="card">
-  <label class="chk"><input type="checkbox" id="inv" checked> Produtos mais escuros que o fundo</label>
-  <div class="ctl"><label><span>Tamanho mínimo do produto</span><span id="vA"></span></label>
-    <input type="range" id="area" min="0.05" max="5" step="0.05" value="0.3"></div>
-  <div class="ctl"><label><span>Sensibilidade</span><span id="vT"></span></label>
-    <input type="range" id="off" min="-50" max="50" step="1" value="0"></div>
-  <div class="msg">Dica: fundo liso e bem iluminado, com os produtos separados, dá a melhor contagem. Ajuste os controles até o número bater.</div>
+  <div class="ctl"><label for="cls"><span>O que contar</span></label>
+    <select id="cls"><option value="all">Tudo (menos pessoas)</option></select></div>
+  <div class="ctl"><label><span>Confiança mínima da IA</span><span id="vC"></span></label>
+    <input type="range" id="conf" min="10" max="90" step="5" value="40"></div>
+  <div class="msg">Abaixo da contagem aparece o nome que a IA deu para cada coisa que ela vê. Escolha em “O que contar” o nome que corresponde ao seu produto. Se a IA contar coisas a mais, aumente a confiança; se faltar produto, diminua.</div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const view=$('view'),vctx=view.getContext('2d');
-const work=document.createElement('canvas'),wctx=work.getContext('2d',{willReadFrequently:true});
 const video=document.createElement('video');video.playsInline=true;video.muted=true;
 const still=document.createElement('canvas');
-let stream=null,mode='idle',hist=[],timer=null;
-const W=320;
+let model=null,stream=null,mode='idle',hist=[],timer=null,busy=false,last=null;
+const known=new Set();
+const msg=t=>$('msg').textContent=t;
 
-function otsu(g){
-  const h=new Array(256).fill(0);for(let i=0;i<g.length;i++)h[g[i]]++;
-  const tot=g.length;let sum=0;for(let i=0;i<256;i++)sum+=i*h[i];
-  let sb=0,wb=0,best=0,t=128;
-  for(let i=0;i<256;i++){wb+=h[i];if(!wb)continue;const wf=tot-wb;if(!wf)break;
-    sb+=i*h[i];const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>best){best=v;t=i}}
-  return t;
+async function loadModel(){
+  if(model)return true;
+  if(!window.cocoSsd||!window.tf){msg('Não consegui carregar a IA. Confira a internet e se a página está em HTTPS.');return false}
+  msg('Carregando a IA (só na primeira vez, pode levar alguns segundos)...');
+  try{await tf.ready();model=await cocoSsd.load({base:'lite_mobilenet_v2'});msg('');return true}
+  catch(e){msg('Falha ao carregar a IA: '+(e.message||e));return false}
 }
 
-function analyze(src,sw,sh){
-  const w=W,h=Math.max(2,Math.round(W*sh/sw));
-  work.width=w;work.height=h;wctx.drawImage(src,0,0,w,h);
-  const d=wctx.getImageData(0,0,w,h).data,n=w*h,g=new Uint8Array(n);
-  for(let i=0;i<n;i++)g[i]=(d[i*4]*77+d[i*4+1]*150+d[i*4+2]*29)>>8;
-  const b=new Uint8Array(g);
-  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;
-    b[i]=(g[i-w-1]+g[i-w]+g[i-w+1]+g[i-1]+g[i]+g[i+1]+g[i+w-1]+g[i+w]+g[i+w+1])/9}
-  const t=Math.min(254,Math.max(1,otsu(b)+(+$('off').value)));
-  const inv=$('inv').checked;
-  let m=new Uint8Array(n);
-  for(let i=0;i<n;i++)m[i]=(inv?b[i]<=t:b[i]>t)?1:0;
-  // abertura 3x3 (erode + dilate)
-  const e=new Uint8Array(n);
-  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;
-    e[i]=m[i]&&m[i-1]&&m[i+1]&&m[i-w]&&m[i+w]&&m[i-w-1]&&m[i-w+1]&&m[i+w-1]&&m[i+w+1]?1:0}
-  const o=new Uint8Array(n);
-  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;
-    o[i]=e[i]||e[i-1]||e[i+1]||e[i-w]||e[i+w]||e[i-w-1]||e[i-w+1]||e[i+w-1]||e[i+w+1]?1:0}
-  // componentes conectados
-  const minA=n*(+$('area').value)/100,maxA=n*0.6;
-  const seen=new Uint8Array(n),st=new Int32Array(n),boxes=[];
-  for(let s=0;s<n;s++){
-    if(!o[s]||seen[s])continue;
-    let sp=0,a=0,x0=w,y0=h,x1=0,y1=0;st[sp++]=s;seen[s]=1;
-    while(sp){const i=st[--sp],x=i%w,y=(i/w)|0;a++;
-      if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
-      if(x>0&&o[i-1]&&!seen[i-1]){seen[i-1]=1;st[sp++]=i-1}
-      if(x<w-1&&o[i+1]&&!seen[i+1]){seen[i+1]=1;st[sp++]=i+1}
-      if(y>0&&o[i-w]&&!seen[i-w]){seen[i-w]=1;st[sp++]=i-w}
-      if(y<h-1&&o[i+w]&&!seen[i+w]){seen[i+w]=1;st[sp++]=i+w}}
-    if(a>=minA&&a<=maxA)boxes.push({x:x0,y:y0,w:x1-x0+1,h:y1-y0+1});
-  }
-  return{boxes,w};
+async function detect(src,sw,sh,smooth){
+  if(busy||!model)return;
+  busy=true;
+  try{
+    const p=await model.detect(src,40,0.05);
+    last={src,sw,sh,p};
+    render(smooth);
+  }catch(e){msg('Erro na detecção: '+(e.message||e))}
+  finally{busy=false}
 }
 
-function run(src,sw,sh,smooth){
-  const{boxes,w}=analyze(src,sw,sh);
+function render(smooth){
+  if(!last||mode==='idle')return;
+  const{src,sw,sh,p}=last;
+  const minS=(+$('conf').value)/100;
+  p.forEach(d=>{if(!known.has(d.class)){known.add(d.class);const o=document.createElement('option');o.value=d.class;o.textContent=d.class;$('cls').appendChild(o)}});
+  const sel=$('cls').value;
+  const ok=p.filter(d=>d.score>=minS);
+  const mine=ok.filter(d=>sel==='all'?d.class!=='person':d.class===sel);
   view.width=sw;view.height=sh;vctx.drawImage(src,0,0,sw,sh);
-  const k=sw/w;vctx.lineWidth=Math.max(2,sw/260);vctx.strokeStyle='#22c55e';
-  vctx.font='bold '+Math.max(14,sw/32)+'px system-ui';vctx.fillStyle='#22c55e';
-  boxes.forEach((b,i)=>{vctx.strokeRect(b.x*k,b.y*k,b.w*k,b.h*k);vctx.fillText(i+1,b.x*k+3,b.y*k+Math.max(14,sw/32))});
-  let c=boxes.length;
+  const fs=Math.max(14,sw/36);vctx.font='bold '+fs+'px system-ui';vctx.lineWidth=Math.max(2,sw/260);
+  ok.forEach(d=>{
+    const mark=mine.includes(d),[x,y,w,h]=d.bbox;
+    vctx.strokeStyle=mark?'#22c55e':'#94a3b8';vctx.strokeRect(x,y,w,h);
+    if(mark){const i=mine.indexOf(d)+1;vctx.fillStyle='#22c55e';vctx.fillText(i+' '+d.class+' '+Math.round(d.score*100)+'%',x+4,y+fs)}
+  });
+  let c=mine.length;
   if(smooth){hist.push(c);if(hist.length>5)hist.shift();c=[...hist].sort((a,b)=>a-b)[hist.length>>1]}
   $('n').textContent=c;$('lbl').textContent=c===1?'produto':'produtos';
+  const cnt={};ok.forEach(d=>cnt[d.class]=(cnt[d.class]||0)+1);
+  $('dets').textContent=ok.length?'A IA vê: '+Object.entries(cnt).map(([k,v])=>k+' ×'+v).join(' · '):'A IA não reconheceu nada por enquanto.';
   $('ph').style.display='none';
 }
 
-function loop(){
+async function loop(){
   if(mode!=='live')return;
-  if(video.readyState>=2&&video.videoWidth)run(video,video.videoWidth,video.videoHeight,true);
-  timer=setTimeout(()=>requestAnimationFrame(loop),120);
+  if(video.readyState>=2&&video.videoWidth)await detect(video,video.videoWidth,video.videoHeight,true);
+  if(mode==='live')timer=setTimeout(loop,30);
 }
 
 async function start(){
-  $('msg').textContent='';
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    $('msg').textContent='Câmera ao vivo indisponível aqui (precisa de HTTPS). Use “Enviar foto”.';return}
+  msg('');
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg('Câmera ao vivo indisponível aqui (precisa de HTTPS). Use “Enviar foto”.');return}
+  $('bStart').disabled=true;
+  const ready=await loadModel();
   try{
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
     video.srcObject=stream;await video.play();
-    mode='live';hist=[];$('bShot').disabled=false;$('bLive').disabled=true;$('bStart').textContent='Desligar câmera';$('bStart').classList.add('r');loop();
-  }catch(err){
-    $('msg').textContent='Não consegui abrir a câmera ('+(err.name||'erro')+'). Use “Enviar foto” para tirar pela câmera do celular.';
-  }
+    mode='live';hist=[];$('bShot').disabled=!ready;$('bLive').disabled=true;
+    $('bStart').textContent='Desligar câmera';$('bStart').classList.add('r');
+    if(ready)loop();
+  }catch(err){msg('Não consegui abrir a câmera ('+(err.name||'erro')+'). Use “Enviar foto”.')}
+  $('bStart').disabled=false;
 }
-
-function shot(){
-  if(mode!=='live')return;
-  clearTimeout(timer);
-  still.width=video.videoWidth;still.height=video.videoHeight;
-  still.getContext('2d').drawImage(video,0,0);
-  mode='photo';$('bLive').disabled=false;run(still,still.width,still.height,false);
-}
-
-function back(){if(!stream)return;mode='live';hist=[];$('bLive').disabled=true;loop()}
 
 function stop(){
   clearTimeout(timer);
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
   $('bStart').textContent='Abrir câmera';$('bStart').classList.remove('r');
   $('bShot').disabled=true;$('bLive').disabled=true;
-  if(mode==='live'){mode='idle';hist=[];vctx.clearRect(0,0,view.width,view.height);$('n').textContent='0';$('lbl').textContent='produtos';$('ph').style.display='block'}
+  if(mode==='live'){mode='idle';hist=[];last=null;vctx.clearRect(0,0,view.width,view.height);
+    $('n').textContent='0';$('lbl').textContent='produtos';$('dets').textContent='';$('ph').style.display='block'}
 }
+
+async function shot(){
+  if(mode!=='live')return;
+  clearTimeout(timer);
+  still.width=video.videoWidth;still.height=video.videoHeight;
+  still.getContext('2d').drawImage(video,0,0);
+  mode='photo';$('bLive').disabled=false;
+  while(busy)await new Promise(r=>setTimeout(r,30));
+  await detect(still,still.width,still.height,false);
+}
+
+function back(){if(!stream)return;mode='live';hist=[];$('bLive').disabled=true;loop()}
+
 $('bStart').onclick=()=>stream?stop():start();
 $('bShot').onclick=shot;
 $('bLive').onclick=back;
-$('file').onchange=e=>{
+$('file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
   clearTimeout(timer);
+  const ready=await loadModel();if(!ready)return;
   const img=new Image();
-  img.onload=()=>{const s=Math.min(1,1280/img.width);
+  img.onload=async()=>{const s=Math.min(1,1280/img.width);
     still.width=img.width*s;still.height=img.height*s;
     still.getContext('2d').drawImage(img,0,0,still.width,still.height);
-    mode='photo';$('bLive').disabled=!stream;run(still,still.width,still.height,false);URL.revokeObjectURL(img.src)};
+    mode='photo';$('bLive').disabled=!stream;URL.revokeObjectURL(img.src);
+    while(busy)await new Promise(r=>setTimeout(r,30));
+    await detect(still,still.width,still.height,false)};
   img.src=URL.createObjectURL(f);e.target.value='';
 };
 
-function sync(){
-  $('vA').textContent=$('area').value+'%';
-  $('vT').textContent=($('off').value>0?'+':'')+$('off').value;
-  if(mode==='photo')run(still,still.width,still.height,false);
-}
-['area','off','inv'].forEach(id=>$(id).addEventListener('input',sync));
+function sync(){$('vC').textContent=$('conf').value+'%';if(mode==='photo')render(false)}
+$('conf').addEventListener('input',sync);
+$('cls').addEventListener('change',()=>{hist=[];if(mode==='photo')render(false)});
 sync();
 </script>
 </body>
