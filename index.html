@@ -69,7 +69,7 @@ const $=id=>document.getElementById(id);
 const view=$('view'),vctx=view.getContext('2d');
 const video=document.createElement('video');video.playsInline=true;video.muted=true;
 const still=document.createElement('canvas');
-let model=null,stream=null,mode='idle',hist=[],timer=null,busy=false,last=null;
+let model=null,stream=null,mode='idle',hist=[],timer=null,busy=false,last=null,tracks=[];
 const known=new Set();
 const msg=t=>$('msg').textContent=t;
 
@@ -87,9 +87,25 @@ async function detect(src,sw,sh,smooth){
   try{
     const p=await model.detect(src,40,0.05);
     last={src,sw,sh,p};
+    if(smooth)track(p);
     render(smooth);
   }catch(e){msg('Erro na detecção: '+(e.message||e))}
   finally{busy=false}
+}
+
+const MAXMISS=10;
+function iou(a,b){const x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),x2=Math.min(a[0]+a[2],b[0]+b[2]),y2=Math.min(a[1]+a[3],b[1]+b[3]);const i=Math.max(0,x2-x1)*Math.max(0,y2-y1);return i/(a[2]*a[3]+b[2]*b[3]-i||1)}
+function track(p){
+  const minS=(+$('conf').value)/100,pairs=[];
+  tracks.forEach((t,ti)=>p.forEach((d,di)=>{if(d.class===t.cls){const v=iou(t.bbox,d.bbox);if(v>0.3)pairs.push([v,ti,di])}}));
+  pairs.sort((a,b)=>b[0]-a[0]);
+  const ut=new Set(),ud=new Set();
+  pairs.forEach(([v,ti,di])=>{if(ut.has(ti)||ud.has(di))return;ut.add(ti);ud.add(di);
+    const t=tracks[ti],d=p[di];
+    t.bbox=t.bbox.map((q,k)=>q*0.5+d.bbox[k]*0.5);t.score=t.score*0.6+d.score*0.4;t.miss=0;t.hits++});
+  tracks.forEach((t,i)=>{if(!ut.has(i))t.miss++});
+  p.forEach((d,di)=>{if(!ud.has(di)&&d.score>=minS)tracks.push({cls:d.class,bbox:d.bbox.slice(),score:d.score,miss:0,hits:1})});
+  tracks=tracks.filter(t=>t.miss<=MAXMISS);
 }
 
 function render(smooth){
@@ -98,7 +114,7 @@ function render(smooth){
   const minS=(+$('conf').value)/100;
   p.forEach(d=>{if(!known.has(d.class)){known.add(d.class);const o=document.createElement('option');o.value=d.class;o.textContent=d.class;$('cls').appendChild(o)}});
   const sel=$('cls').value;
-  const ok=p.filter(d=>d.score>=minS);
+  const ok=smooth?tracks.filter(t=>t.hits>=2&&t.score>=minS*0.6).map(t=>({class:t.cls,bbox:t.bbox,score:t.score})):p.filter(d=>d.score>=minS);
   const mine=ok.filter(d=>sel==='all'?d.class!=='person':d.class===sel);
   view.width=sw;view.height=sh;vctx.drawImage(src,0,0,sw,sh);
   const fs=Math.max(14,sw/36);vctx.font='bold '+fs+'px system-ui';vctx.lineWidth=Math.max(2,sw/260);
@@ -107,8 +123,7 @@ function render(smooth){
     vctx.strokeStyle=mark?'#22c55e':'#94a3b8';vctx.strokeRect(x,y,w,h);
     if(mark){const i=mine.indexOf(d)+1;vctx.fillStyle='#22c55e';vctx.fillText(i+' '+d.class+' '+Math.round(d.score*100)+'%',x+4,y+fs)}
   });
-  let c=mine.length;
-  if(smooth){hist.push(c);if(hist.length>5)hist.shift();c=[...hist].sort((a,b)=>a-b)[hist.length>>1]}
+  const c=mine.length;
   $('n').textContent=c;$('lbl').textContent=c===1?'produto':'produtos';
   const cnt={};ok.forEach(d=>cnt[d.class]=(cnt[d.class]||0)+1);
   $('dets').textContent=ok.length?'A IA vê: '+Object.entries(cnt).map(([k,v])=>k+' ×'+v).join(' · '):'A IA não reconheceu nada por enquanto.';
@@ -129,7 +144,7 @@ async function start(){
   try{
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
     video.srcObject=stream;await video.play();
-    mode='live';hist=[];$('bShot').disabled=!ready;$('bLive').disabled=true;
+    mode='live';hist=[];tracks=[];$('bShot').disabled=!ready;$('bLive').disabled=true;
     $('bStart').textContent='Desligar câmera';$('bStart').classList.add('r');
     if(ready)loop();
   }catch(err){msg('Não consegui abrir a câmera ('+(err.name||'erro')+'). Use “Enviar foto”.')}
@@ -141,7 +156,7 @@ function stop(){
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
   $('bStart').textContent='Abrir câmera';$('bStart').classList.remove('r');
   $('bShot').disabled=true;$('bLive').disabled=true;
-  if(mode==='live'){mode='idle';hist=[];last=null;vctx.clearRect(0,0,view.width,view.height);
+  if(mode==='live'){mode='idle';hist=[];tracks=[];last=null;vctx.clearRect(0,0,view.width,view.height);
     $('n').textContent='0';$('lbl').textContent='produtos';$('dets').textContent='';$('ph').style.display='block'}
 }
 
@@ -155,7 +170,7 @@ async function shot(){
   await detect(still,still.width,still.height,false);
 }
 
-function back(){if(!stream)return;mode='live';hist=[];$('bLive').disabled=true;loop()}
+function back(){if(!stream)return;mode='live';hist=[];tracks=[];$('bLive').disabled=true;loop()}
 
 $('bStart').onclick=()=>stream?stop():start();
 $('bShot').onclick=shot;
